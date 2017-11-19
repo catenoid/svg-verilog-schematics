@@ -185,9 +185,9 @@ logging.info("Printing wire declarations")
 class TestBench:
     """Collect what's required for the simulation in a named tuple"""
     def __init__(self):
-        self.module_decls = ""
-        self.wire_decls = ""
-        self.module_instances = ""
+        self.module_decls = []
+        self.wire_decls = []
+        self.module_instances = []
 
 tb = TestBench()
 
@@ -196,7 +196,7 @@ for i, link in enumerate(links):
     into = getClosestBox(boxes, link.end)
     logging.info("Adding edge %s %s" % (outof, into))
     G.add_edge(outof, into, connector=link)
-    tb.wire_decls += build_wire_decl(link.width, link.ident)
+    tb.wire_decls.append(build_wire_decl(link.width, link.ident))
 
 
 for node in G.nodes():
@@ -246,27 +246,9 @@ def to_csv(idents):
         return idents[0] + ", " + to_csv(idents[1:])
 
 
-def build_source_assigns(idents):
-    return '\n'.join("assign %s = count;" % ident for ident in idents)
-
-
-def build_source_decl(n_outputs):
-    idents = ['out'+str(i) for i in range(n_outputs)]
-    return source_template.format(**{'output_idents': to_csv(idents), \
-                                     'output_decls': '\n'.join([ \
-                                         build_decl(False, 8, ident) \
-                                         for ident in idents ]), \
-                                     'assign_from_count': build_source_assigns(idents)
-                                    })
-
 
 
 # this will eventually look at the width of the input, but always returns one bit
-
-
-#tb.module_decls += comparator_template
-# not yet ya don't
-# add to the decls once you've found the box
 
 class ModuleException(Exception):
     pass
@@ -281,10 +263,25 @@ class SourceInstance:
         if (len(wires_in) != 0):
             raise ImproperPortSpec
 
-        tb.module_decls += build_source_decl(len(wires_out))
+        decl = self.build_source_decl(len(wires_out))
+        tb.module_decls.append(decl)
 
-        source_instantiation = """source source0 (count, {output_idents});"""
-        tb.module_instances += source_instantiation.format(**{'output_idents': to_csv(wires_out)})
+        inst_templ = """source source0 (count, {output_idents});"""
+        inst = inst_templ.format(**{'output_idents': to_csv(wires_out)})
+        tb.module_instances.append(inst)
+
+    def build_source_assigns(self, idents):
+        return '\n'.join("assign %s = count;" % ident for ident in idents)
+    
+    def build_source_decl(self, n_outputs):
+        idents = ['out'+str(i) for i in range(n_outputs)]
+        assigns = self.build_source_assigns(idents)
+        return source_template.format(**{'output_idents': to_csv(idents), \
+                                         'output_decls': '\n'.join([ \
+                                             build_decl(False, 8, ident) \
+                                             for ident in idents ]), \
+                                         'assign_from_count': assigns \
+                                        })
 
 
 logic_string_to_symbol = {'OR' : '|'}
@@ -298,13 +295,13 @@ class LogicInstances:
             raise BinOpArguementsInsufficient
         
         verilog_symbol = logic_string_to_symbol[desc]
-        logging.info(verilog_symbol)
-        print(wires_in)
         operation = self.add_operators(wires_in, verilog_symbol)
-        assigns =  [ """assign {wire_out} = {operation};""".format(**{'wire_out': wire_out, 'operation': operation}) for wire_out in wires_out ]
+        template = "assign {wire_out} = {operation};"
+        assigns =  [template.format(**{'wire_out': wire_out, \
+                                       'operation': operation}) \
+                                       for wire_out in wires_out ]
         decls = '\n'.join(assigns)
-        print(decls)
-        self.tb.module_instances += decls
+        self.tb.module_instances.append(decls)
 
     def add_operators(self, idents, symbol):
         def interpolate(idents):
@@ -338,17 +335,19 @@ class ComparatorInstances:
         op_string = params['op']+str(params['v'])
     
         # all modules have unique names for now
-        module_name = 'comp'+str(self.n_modules)
+        module_name = 'comparator'+str(self.n_modules)
         self.n_modules += 1
 
-        self.tb.module_decls += comparator_template.format(**{'module_name': module_name, \
-                                                         'op_string' : op_string})
-        comparator_instatiation = """{module_name} comp{n_modules} ({input}, {output});"""
-        inst = (comparator_instatiation.format(**{'module_name': module_name, \
-                                                  'n_modules': self.n_modules, \
-                                                  'input': wire_in, \
-                                                  'output': wire_out }))
-        self.tb.module_instances += inst
+        decl = comparator_template.format(**{'module_name': module_name, \
+                                             'op_string' : op_string})
+        self.tb.module_decls.append(decl)
+        
+        inst_templ = """{module_name} comp{n_modules} ({input}, {output});"""
+        inst = inst_templ.format(**{'module_name': module_name, \
+                                    'n_modules': self.n_modules, \
+                                    'input': wire_in, \
+                                    'output': wire_out })
+        self.tb.module_instances.append(inst)
 
 # INSTATIATIONS
 # -------------
@@ -416,7 +415,7 @@ initial
 endmodule    
 """
 
-print(testbench_template.format(**{'module_decls': tb.module_decls,
-                                 'wire_decls' : tb.wire_decls,
-                                 'module_instances' : tb.module_instances
-                                }))
+print(testbench_template.format(**{'module_decls': '\n'.join(tb.module_decls),
+                           'wire_decls' : '\n'.join(tb.wire_decls),
+                           'module_instances' : '\n'.join(tb.module_instances)
+                           }))
