@@ -287,7 +287,32 @@ class SourceInstance:
         tb.module_instances += source_instantiation.format(**{'output_idents': to_csv(wires_out)})
 
 
-# This depends on the size of wires_out in SourceInstance
+logic_string_to_symbol = {'OR' : '|'}
+
+class LogicInstances:
+    def __init__(self, tb):
+        self.tb = tb
+
+    def add_instance(self, desc, wires_in, wires_out):
+        if len(wires_in) < 2:
+            raise BinOpArguementsInsufficient
+        
+        verilog_symbol = logic_string_to_symbol[desc]
+        logging.info(verilog_symbol)
+        print(wires_in)
+        operation = self.add_operators(wires_in, verilog_symbol)
+        assigns =  [ """assign {wire_out} = {operation};""".format(**{'wire_out': wire_out, 'operation': operation}) for wire_out in wires_out ]
+        decls = '\n'.join(assigns)
+        print(decls)
+        self.tb.module_instances += decls
+
+    def add_operators(self, idents, symbol):
+        def interpolate(idents):
+            if len(idents) == 1:
+                return idents[0]
+            else:
+                return idents[0] + symbol + interpolate(idents[1:])
+        return interpolate(idents)
 
 comparator_template = """
 module {module_name} (in0, out0);
@@ -337,7 +362,8 @@ class ComparatorInstances:
 # every node in the graph is now annotated with the connectors that go in and out
 # print the declarations 
 
-compinsts = ComparatorInstances(tb)
+comparators = ComparatorInstances(tb)
+comb_logic = LogicInstances(tb)
 
 import json
 
@@ -346,9 +372,11 @@ for box in G.nodes():
     if (module_type == 'comparator'):
         op_string = box.body['desc']
 
-        compinsts.add_instance(op_string, box.inputs, box.outputs)
+        comparators.add_instance(op_string, box.inputs, box.outputs)
     elif (module_type == 'source'):
         SourceInstance(box.inputs, box.outputs)
+    elif (module_type == 'OR'):
+        comb_logic.add_instance(module_type, box.inputs, box.outputs)
     else:
         logging.info("No constructor for title %s" % module_type)
         
