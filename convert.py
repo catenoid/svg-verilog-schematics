@@ -284,7 +284,7 @@ class SourceInstance:
                                         })
 
 
-logic_string_to_symbol = {'OR' : '|'}
+logic_string_to_symbol = {'OR' : '|', 'AND' : '&'}
 
 class LogicInstances:
     def __init__(self, tb):
@@ -368,14 +368,26 @@ import json
 
 for box in G.nodes():
     module_type = box.body['title']
+
     if (module_type == 'comparator'):
         op_string = box.body['desc']
 
         comparators.add_instance(op_string, box.inputs, box.outputs)
+
     elif (module_type == 'source'):
         SourceInstance(box.inputs, box.outputs)
-    elif (module_type == 'OR'):
+
+    elif (module_type in logic_string_to_symbol):
         comb_logic.add_instance(module_type, box.inputs, box.outputs)
+
+    elif (module_type == 'result'):
+        tb.wire_decls.append("wire result;")
+
+        if (len(box.inputs) != 1):
+            raise ImproperPortSpec
+
+        tb.module_instances.append("assign result = %s;" % box.inputs[0])
+
     else:
         logging.info("No constructor for title %s" % module_type)
         
