@@ -55,7 +55,7 @@
      inkscape:pageopacity="0.0"
      inkscape:pageshadow="2"
      inkscape:zoom="0.98994949"
-     inkscape:cx="375.29359"
+     inkscape:cx="211.1438"
      inkscape:cy="628.96135"
      inkscape:document-units="mm"
      inkscape:current-layer="layer1"
@@ -155,7 +155,7 @@
        id="g2517"
        transform="translate(5.6126601,-9.4212381)">
       <desc
-         id="desc2577">op=&quot;&gt;&quot;;v=5</desc>
+         id="desc2577">&quot;op&quot; : &quot;&gt;&quot;, &quot;v&quot; : 5</desc>
       <title
          id="title2575">comparator</title>
       <rect
