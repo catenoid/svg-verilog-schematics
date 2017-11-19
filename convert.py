@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 
 # read svg
 import argparse
@@ -59,7 +59,6 @@ for path in paths:
             raise WireWidthUnspecified
 
         ident = 'wire'+str(wire_index)
-        wire_index += 1
 
         # Directionality of connector?
         end1, end2 = p[0].start, p[-1].end
@@ -74,6 +73,8 @@ for path in paths:
             links.append(Connector(end2, end1, width, ident))
         else:
             raise WireDirectionUnspecified
+        logging.info("Add connector %s width %d" % (ident, width))
+        wire_index += 1
 
 
 class Box:
@@ -114,18 +115,30 @@ groups = doc.getElementsByTagName("g")
 
 boxes = []
 
+class SchematicError(Exception):
+    pass
+
+class UndescribedBox(SchematicError):
+    """Every box needs a title"""
+    pass
+
 for g in groups:
     if (g.getAttribute("id") == u'layer1'):
         # a group is defined for the top level layer
         continue  
 
-    # there needs to be a way for a box to store its functionality
+    # stores the functionality description of a box
     body = {}
+
+    # the title is generically what the modules does eg. compares
     title = g.getElementsByTagName("title")
     if len(title) > 0:
         title_value = title[0].childNodes[0].nodeValue
         body['title'] = title_value
+    else:
+        raise UndescribedBox
         
+    # some boxes have an additional descriptive string
     desc = g.getElementsByTagName("desc")
     if len(desc) > 0:
         desc_value = desc[0].childNodes[0].nodeValue
@@ -140,6 +153,7 @@ for g in groups:
 
     box = Box(corner, width, height, body)
     boxes.append(box)
+    logging.info("Added %s" % str(box))
 
 
 # identify which connectors interface to which boxes
@@ -180,6 +194,7 @@ tb = TestBench()
 for i, link in enumerate(links):
     outof = getClosestBox(boxes, link.start)
     into = getClosestBox(boxes, link.end)
+    logging.info("Adding edge %s %s" % (outof, into))
     G.add_edge(outof, into, connector=link)
     tb.wire_decls += build_wire_decl(link.width, link.ident)
 
@@ -335,7 +350,7 @@ for box in G.nodes():
     elif (module_type == 'source'):
         SourceInstance(box.inputs, box.outputs)
     else:
-        logging.warning("No constructor for title %s" % module_type)
+        logging.info("No constructor for title %s" % module_type)
         
 
 testbench_template = """
