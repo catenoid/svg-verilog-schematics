@@ -247,16 +247,11 @@ def build_source_decl(n_outputs):
 
 
 # this will eventually look at the width of the input, but always returns one bit
-comparator_template = """
-module comparator (in0, out0);
-input [7:0] in0;
-output out0;
-assign out0 = (in0 > 5) ? 1 : 0;
-endmodule"""
 
 
-tb.module_decls += comparator_template
-
+#tb.module_decls += comparator_template
+# not yet ya don't
+# add to the decls once you've found the box
 
 class ModuleException(Exception):
     pass
@@ -270,26 +265,50 @@ class SourceInstance:
     def __init__(self, wires_in, wires_out):
         if (len(wires_in) != 0):
             raise ImproperPortSpec
-        self.idents = wires_out
 
-    def __str__(self):
+        tb.module_decls += build_source_decl(len(wires_out))
+
         source_instantiation = """source source0 (count, {output_idents});"""
-        return (source_instantiation.format(**{'output_idents': to_csv(self.idents)}))
+        tb.module_instances += source_instantiation.format(**{'output_idents': to_csv(wires_out)})
+
 
 # This depends on the size of wires_out in SourceInstance
-tb.module_decls += build_source_decl(1)
 
-class ComparatorInstance:
-    def __init__(self, wires_in, wires_out):
+comparator_template = """
+module {module_name} (in0, out0);
+input [7:0] in0;
+output out0;
+assign out0 = (in0 {op_string}) ? 1 : 0;
+endmodule"""
+
+class ComparatorInstances:
+    def __init__(self, tb):
+        self.tb = tb
+        self.n_modules = 0
+
+    def add_instance(self, desc_string, wires_in, wires_out):
         if (len(wires_in) != 1 or len(wires_out) != 1):
             raise ImproperPortSpec
-        self.wire_in = wires_in[0]
-        self.wire_out = wires_out[0]
+        wire_in = wires_in[0]
+        wire_out = wires_out[0]
 
-    def __str__(self):
-        comparator_instatiation = """comparator comp0 ({input}, {output});"""
-        return (comparator_instatiation.format(**{'input': self.wire_in, \
-                                                  'output': self.wire_out }))
+        # op_string should be json without the surrounding curlies
+        json_string = '{'+desc_string+'}'
+        params = json.loads(json_string)
+        op_string = params['op']+str(params['v'])
+    
+        # all modules have unique names for now
+        module_name = 'comp'+str(self.n_modules)
+        self.n_modules += 1
+
+        self.tb.module_decls += comparator_template.format(**{'module_name': module_name, \
+                                                         'op_string' : op_string})
+        comparator_instatiation = """{module_name} comp{n_modules} ({input}, {output});"""
+        inst = (comparator_instatiation.format(**{'module_name': module_name, \
+                                                  'n_modules': self.n_modules, \
+                                                  'input': wire_in, \
+                                                  'output': wire_out }))
+        self.tb.module_instances += inst
 
 # INSTATIATIONS
 # -------------
@@ -303,14 +322,21 @@ class ComparatorInstance:
 # every node in the graph is now annotated with the connectors that go in and out
 # print the declarations 
 
-title_to_module = { 'comparator' : ComparatorInstance,
-                    'source' : SourceInstance }
+compinsts = ComparatorInstances(tb)
+
+import json
 
 for box in G.nodes():
     module_type = box.body['title']
-    if (module_type in title_to_module):
-        instance = title_to_module[module_type]
-        tb.module_instances += str(instance(box.inputs, box.outputs))
+    if (module_type == 'comparator'):
+        op_string = box.body['desc']
+
+        compinsts.add_instance(op_string, box.inputs, box.outputs)
+    elif (module_type == 'source'):
+        SourceInstance(box.inputs, box.outputs)
+    else:
+        logging.warning("No constructor for title %s" % module_type)
+        
 
 testbench_template = """
 `timescale 1ns / 1ns
