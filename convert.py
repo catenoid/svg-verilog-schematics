@@ -1,32 +1,39 @@
 import logging
 logging.basicConfig(level=logging.INFO)
 
-# read svg
+# Read SVG as a command line arguement
 import argparse
-
 parser = argparse.ArgumentParser()
-parser.add_argument('infile',
-    help="specifiy a file")
+parser.add_argument('infile', help="specifiy a file")
 args = parser.parse_args()
 
-# create dom
+# Create DOM from parsing input SVG
 from xml.dom import minidom
 from svg.path import parse_path
 doc = minidom.parse(args.infile)
 
-# extract paths (these will be connectors + (unhelpfully) the arrowheads on those connectors
+
+
+
+# CONNECTORS / WIRES
+# ------------------
+
+# Extract all paths in the input
+#     these will be the connectors between boxes and (unhelpfully) the arrowheads on those connectors
 paths = doc.getElementsByTagName("path")
 
 class Connector:
-  def __init__(self, start, end, width, ident):
-    self.width = width
-    self.ident = ident
-    # these are complex numbers x + y*i
-    # The getters are .real, .imag
-    self.start = start
-    self.end = end
-  def __str__(self):
-    return "Wire "+self.ident
+    """Object representing a connector between boxes"""
+    def __init__(self, start, end, width, ident):
+        self.width = width
+        self.ident = ident
+        # these are complex numbers x + y*i
+        # The getters are .real, .imag
+        self.start = start
+        self.end = end
+
+    def __str__(self):
+        return "Wire "+self.ident
 
 links = [] # keep track of all connectors
 
@@ -49,22 +56,24 @@ wire_index = 0
 for path in paths:
     p = parse_path(path.getAttribute("d"))
     if (not p.closed):
-        # Discount the arrowheads, which are closed
+        # This test discount the arrowheads, which are closed paths
 
-        # extract the width, specified in the box
+        # 1. Extract the wire width, specified in the SVG descriptor tag
         desc = path.getElementsByTagName("desc")
         if len(desc) > 0:
             width = int(desc[0].childNodes[0].nodeValue)
         else:
             raise WireWidthUnspecified
 
+        # 2. Assign a unique identifier for each wire
         ident = 'wire'+str(wire_index)
 
-        # Directionality of connector?
+        # 3. Establish the directionality of the connector
         end1, end2 = p[0].start, p[-1].end
 
         has_front_arrowhead = "marker-end" in path.getAttribute("style")
         has_back_arrowhead = "marker-start" in path.getAttribute("style")
+
         if (has_front_arrowhead and has_back_arrowhead):
             raise AmbiguousWireDirection            
         elif (has_front_arrowhead):
@@ -73,64 +82,71 @@ for path in paths:
             links.append(Connector(end2, end1, width, ident))
         else:
             raise WireDirectionUnspecified
+
         logging.info("Add connector %s width %d" % (ident, width))
         wire_index += 1
 
 
+
+
+# BOXES / MODULES
+# ---------------
+
 class Box:
-  def __init__(self, c, w, h, body):
-    self.c = c
-    self.w = w
-    self.h = h
-    self.body = body
+    """Object representing a box in the schematic. For now, there is a 1-1 correspondence with Verilog modules"""
+    def __init__(self, c, w, h, body):
+        self.c = c
+        self.w = w
+        self.h = h
+        self.body = body
 
-    self.inputs = [] # tuples of width, ident?
-    self.outputs = []
+        # tuples of (width, identifier string) for connecting wires
+        self.inputs = []
+        self.outputs = []
 
-  def __str__(self):
-    return "Box " + str(int(self.center.real)) + " " + str(int(self.center.imag))
-
-  def __repr__(self):
-    return str(self)
-
-  def __eq__(self, other):
-    if not isinstance(other, Box):
-      return False
-    # eventually this will depend on what module the instance is of
-    return self.c == other.c and self.w == other.w and self.h == other.h
-
-  def __hash__(self):
-    return int(self.c.real + self.c.imag)
-
-  def distanceTo(self, c2):
-    c1 = self.center
-    return (c1.real-c2.real)**2 + (c1.imag-c2.imag)**2
-
-  @property
-  def center(self):
-    return complex(self.c.real + (self.w/2), self.c.imag + (self.h/2))
+    def __str__(self):
+        return "Box (" + str(int(self.center.real)) + " " + str(int(self.center.imag)) + ")"
+  
+    def __repr__(self):
+        return str(self)
+  
+    def __eq__(self, other):
+        if not isinstance(other, Box):
+            return False
+        return self.c == other.c and self.w == other.w and self.h == other.h
+  
+    def __hash__(self):
+        return int(self.c.real + self.c.imag)
+  
+    def distanceTo(self, c2):
+        c1 = self.center
+        return (c1.real-c2.real)**2 + (c1.imag-c2.imag)**2
+  
+    @property
+    def center(self):
+        return complex(self.c.real + (self.w/2), self.c.imag + (self.h/2))
 
 
 groups = doc.getElementsByTagName("g")
 
 boxes = []
 
-class SchematicError(Exception):
+class BoxException(Exception):
     pass
 
-class UndescribedBox(SchematicError):
-    """Every box needs a title"""
+class UndescribedBox(BoxException):
+    """Every box needs a title, to explain its function in the schematic"""
     pass
 
 for g in groups:
     if (g.getAttribute("id") == u'layer1'):
-        # a group is defined for the top level layer
+        # a group is defined for the top level layer, which we are ignoring (for now)
         continue  
 
-    # stores the functionality description of a box
+    # 1. Collect the functionality description of a box from the text descriptions
     body = {}
 
-    # the title is generically what the modules does eg. compares
+    # The SVG 'title' is generically what the module does eg. compares
     title = g.getElementsByTagName("title")
     if len(title) > 0:
         title_value = title[0].childNodes[0].nodeValue
@@ -138,12 +154,13 @@ for g in groups:
     else:
         raise UndescribedBox
         
-    # some boxes have an additional descriptive string
+    # Some boxes have an additional descriptive string
     desc = g.getElementsByTagName("desc")
     if len(desc) > 0:
         desc_value = desc[0].childNodes[0].nodeValue
         body['desc'] = desc_value
 
+    # 2. Collect the physical position description of the box
     rect = g.getElementsByTagName("rect")[0]
     cornerx = rect.getAttribute("x")
     cornery = rect.getAttribute("y")
@@ -156,7 +173,24 @@ for g in groups:
     logging.info("Added %s" % str(box))
 
 
-# identify which connectors interface to which boxes
+
+
+# GRAPH / SCHEMATIC
+# -----------------
+
+# Identify which connectors interface to which boxes
+import networkx as nx
+G = nx.MultiDiGraph()
+
+class TestBench:
+    """Collect what's required for the simulation"""
+    def __init__(self):
+        self.module_decls = []
+        self.wire_decls = []
+        self.module_instances = []
+
+tb = TestBench()
+
 def getClosestBox(boxes, endpoint):
     if len(boxes) > 1:
         closest = boxes[0]
@@ -168,7 +202,6 @@ def getClosestBox(boxes, endpoint):
                 closest = box
         return closest
 
-
 def build_wire_decl(width, ident):
     if (width == 1):
         return "wire "+ident+";"
@@ -176,37 +209,24 @@ def build_wire_decl(width, ident):
         return "wire ["+str(width-1)+":0] "+ident+";"
 
 
-import networkx as nx
-G = nx.MultiDiGraph()
-
-logging.info("Printing wire declarations")
-
-
-class TestBench:
-    """Collect what's required for the simulation in a named tuple"""
-    def __init__(self):
-        self.module_decls = []
-        self.wire_decls = []
-        self.module_instances = []
-
-tb = TestBench()
-
+logging.info("Adding graph edges (wires)")
 for i, link in enumerate(links):
     outof = getClosestBox(boxes, link.start)
     into = getClosestBox(boxes, link.end)
-    logging.info("Adding edge %s %s" % (outof, into))
+    logging.info("Adding edge from %s to %s" % (outof, into))
     G.add_edge(outof, into, connector=link)
     tb.wire_decls.append(build_wire_decl(link.width, link.ident))
 
 
 for node in G.nodes():
+    # Some debug info:
     logging.info("Data for node: %s" % node)
     nInputs = G.in_degree(node)
     nOutputs = G.out_degree(node)
     logging.info("   "+str(nInputs)+" inputs")
     logging.info("   "+str(nOutputs)+" outputs")
 
-    # annotate the boxes with the nodes
+    # Annotate the boxes with which wires go into or out of them
     for u,v,d in G.out_edges(node, data=True):
         c = d['connector']
         logging.info("wire out to "+str(v)+" width "+str(c.width)+" called "+c.ident)
@@ -217,21 +237,15 @@ for node in G.nodes():
         logging.info("wire in from "+str(u)+" width "+str(c.width)+" called "+c.ident)
         node.inputs.append(c.ident)
 
+    # Make the logger output easier to read
     logging.info("")
 
-# DECLARATIONS
-# ------------
-timescale = """`timescale 1ns / 1ns"""
 
-# source module, depends on how many successor Boxes it has
-source_template = """
-module source (count, {output_idents});
-input [7:0] count;
-{output_decls}
-{assign_from_count}
-endmodule
-"""
 
+
+
+# WRITE VERILOG
+# -------------
 
 def build_decl(is_input, width, ident):
     return ("in" if is_input else "out")+"put ["+str(width-1)+":0] "+ident+";"
@@ -246,17 +260,24 @@ def to_csv(idents):
         return idents[0] + ", " + to_csv(idents[1:])
 
 
-
-
-# this will eventually look at the width of the input, but always returns one bit
-
-class ModuleException(Exception):
+class TranspilingError(Exception):
+    """Class of errors for anything occuring during construction of the Verilog source"""
     pass
 
-
-class ImproperPortSpec(ModuleException):
+class ImproperPortSpec(TranspilingError):
+    """A module doesn't have the right number of input or output wires"""
     pass
 
+class BinOpArguementsInsufficient(TranspilingError):
+    pass
+
+source_template = """
+module source (count, {output_idents});
+input [7:0] count;
+{output_decls}
+{assign_from_count}
+endmodule
+"""
 
 class SourceInstance:
     def __init__(self, wires_in, wires_out):
@@ -316,7 +337,7 @@ module {module_name} (in0, out0);
 input [7:0] in0;
 output out0;
 assign out0 = (in0 {op_string}) ? 1 : 0;
-endmodule"""
+endmodule"""  # this will eventually look at the width of the input wire
 
 class ComparatorInstances:
     def __init__(self, tb):
@@ -349,17 +370,6 @@ class ComparatorInstances:
                                     'output': wire_out })
         self.tb.module_instances.append(inst)
 
-# INSTATIATIONS
-# -------------
-# Use the idents as defined by the connector labelling
-
-# Back when we were cheating:
-#print(SourceInstance([], ['wire0']))
-#print(ComparatorInstance(['wire0'], ['wire1']))
-
-
-# every node in the graph is now annotated with the connectors that go in and out
-# print the declarations 
 
 comparators = ComparatorInstances(tb)
 comb_logic = LogicInstances(tb)
